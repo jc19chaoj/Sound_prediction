@@ -75,8 +75,8 @@ class data_prepare:
             impact_frames_temp = []
             for onset in impact_onsets[i]:
                 onset = int(onset)
-                self.impact_frames.extend(self.videos[i][onset-7:onset+7])
-                impact_frames_temp.append(self.videos[i][onset-7:onset+7])
+                self.impact_frames.extend(self.videos[i][onset-7:onset+8])
+                impact_frames_temp.append(self.videos[i][onset-7:onset+8])
             self.impact_videos.append(impact_frames_temp)
 
         if test!=None:
