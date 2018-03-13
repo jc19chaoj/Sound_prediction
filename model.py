@@ -1,5 +1,8 @@
 import tensorflow as tf
 import numpy as np
+import matplotlib.pyplot as plt
+from random import shuffle
+from itertools import chain
 
 class cnn_rnn:
     """ AlexNet + RNN with LSTM model """
@@ -8,15 +11,16 @@ class cnn_rnn:
                  fixed_layers=['conv1','conv2','conv3','conv4','conv5'],
                  keep_prob=0.5, 
                  batch_size=10, 
-                 lstm_layers=2, 
+                 lstm_layers=3,
+                 learn_rate=0.001, 
                  num_class=0):
         
         self.num_class = num_class
         self.keep_prob = keep_prob         
+        self.learn_rate = learn_rate
                 
         # minibatch config
         self.batch_size = batch_size
-        self.batch_index = 0
         
         # inputs' and labels' placeholder
         self.X = tf.placeholder(tf.float32, [self.batch_size, 340, 604, 3])
@@ -32,16 +36,18 @@ class cnn_rnn:
 
         # conv1
         self.conv1 = self.conv_layer('conv1', self.X, [11, 11], 96, 4, padding='VALID')
+        print("conv1", self.conv1.get_shape())
         self.pool1 = self.pool_layer('pool1', self.conv1, [3, 3], 2)
+        print("pool1", self.pool1.get_shape())
         # conv2
-        self.conv2 = self.conv_layer('conv2', self.pool1, [5, 5], 256)
+        self.conv2 = self.conv_layer('conv2', self.pool1, [5, 5], 256, group=2)
         self.pool2 = self.pool_layer('pool2', self.conv2, [3, 3], 2)
         # conv3
         self.conv3 = self.conv_layer('conv3', self.pool2, [3, 3], 384)
         # conv4
-        self.conv4 = self.conv_layer('conv4', self.conv3, [3, 3], 384)
+        self.conv4 = self.conv_layer('conv4', self.conv3, [3, 3], 384, group=2)
         # conv5
-        self.conv5 = self.conv_layer('conv5', self.conv4, [3, 3], 256)
+        self.conv5 = self.conv_layer('conv5', self.conv4, [3, 3], 256, group=2)
         self.pool5 = self.pool_layer('pool5', self.conv5, [3, 3], 2)
         # fc6
         self.fc6 = self.conv_layer('fc6', self.pool5, [], 4096, padding="VALID", fc_layer=True)
@@ -76,20 +82,25 @@ class cnn_rnn:
 
             # dense layer
             outputs = tf.reshape(outputs, shape=[self.batch_size,256])
-            logits = tf.matmul(outputs, weights) + biases
+            self.logits = tf.matmul(outputs, weights) + biases
             
             
         # define loss function
         rho = lambda r: tf.log(tf.add(tf.square(r),1/625))
-        loss = rho(tf.nn.l2_loss(self.Y-logits))                        
+        loss = rho(tf.nn.l2_loss(self.Y-self.logits))                        
         self.mean_loss = tf.reduce_mean(loss)
+        self.total_loss = tf.reduce_sum(loss)
         
         # choose optimizer
-        self.optimizer = tf.train.AdamOptimizer(0.01).minimize(self.mean_loss)
+        #self.optimizer = tf.train.AdamOptimizer(self.learn_rate).minimize(self.mean_loss)
+        self.optimizer = tf.train.AdamOptimizer(self.learn_rate).minimize(self.total_loss)
+        
+        #return self.logits
         
     def train(self, 
              inputs, 
              labels,
+             test_inputs,
              crop_inputs=False,
              epoch=10):
         
@@ -97,7 +108,8 @@ class cnn_rnn:
         self.epoch = epoch
         
         # inputs' and labels' data
-        self.inputs = inputs
+        # self.inputs = inputs
+        self.inputs = [frame/255 for frame in inputs]
         # self.inputs = [tf.image.convert_image_dtype(frame, dtype=tf.float32) for frame in inputs]
         if crop_inputs:
             self.inputs = [tf.image.resize_image_with_crop_or_pad(self.inputs,227,227) for frame in inputs]
@@ -111,21 +123,37 @@ class cnn_rnn:
             # load pre-trained model
             self.load_weights(sess)
             
+            # training
             print("Start training...")
-            
-            inputs_batch, labels_batch = self.next_batch()
-            
             for i in range(self.epoch):
                 print("epoch: ", i)
-                
+                self.batch_index = 0
+                self.shuffle_data()
                 for j in range(len(self.inputs)//self.batch_size):
-                    loss, _ = sess.run([self.mean_loss, self.optimizer], feed_dict={self.X: inputs_batch, self.Y: labels_batch})
-             
-                print("error: ", loss)
+                    inputs_batch, labels_batch = self.next_batch()
+                    #print(inputs_batch.shape, labels_batch.shape)
                     
+                    loss, _ = sess.run([self.total_loss, self.optimizer], feed_dict={self.X: inputs_batch, self.Y: labels_batch})
+                print("    error: ", loss)
+            
+            self.test(sess, test_inputs)
+
+
+    def test(self, sess, test_inputs):
+        """evaluate prediction"""
+        predict_sound_feature = []
+        for w in range(len(test_inputs)//self.batch_size):        
+            logits = sess.run(self.logits, feed_dict={self.X: test_inputs})
+            predict_sound_feature.extend(logits)
+            
+        predict_sound_feature = np.asarray(predict_sound_feature)
+        plt.figure()
+        plt.imshow(np.asarray(predict_sound_feature.T))
+        plt.colorbar(orientation='vertical')
+        plt.show()
     
     # Helper functions
-    def conv_layer(self, name, inputs, filter_size, output_size, stride=1, padding='SAME', 
+    def conv_layer(self, name, inputs, filter_size, output_size, stride=1, padding='SAME', group=1, 
                    output_layer=False, fc_layer=False):
         # number of channels of input pictures
         input_shape = inputs.get_shape()
@@ -139,7 +167,17 @@ class cnn_rnn:
                 weights = tf.get_variable('weights', shape=[filter_size[0], filter_size[-1], input_channel, output_size])
             biases = tf.get_variable('biases', shape=[output_size])
             
-            conv = tf.nn.conv2d(inputs, weights, strides=[1, stride, stride, 1], padding=padding)
+            conv_op = lambda x, w: tf.nn.conv2d(x, w, strides=[1, stride, stride, 1], padding=padding)
+            
+            if group>1:
+                inputs_split = tf.split(inputs, group, 3)
+                weights_split = tf.split(weights, group, 2)
+                outputs_split = [conv_op(x,w) for x,w in zip(inputs_split, weights_split)]
+                
+                conv = tf.concat(outputs_split, 2)
+            else:
+                conv = conv_op(inputs, weights)
+                
             conv_bias = tf.nn.bias_add(conv, biases)
             activate = tf.nn.relu(conv_bias, name=var_scope.name)
             
@@ -152,40 +190,50 @@ class cnn_rnn:
         return tf.nn.max_pool(inputs, 
                               [1, filter_size[0], filter_size[-1], 1], 
                               [1, stride, stride, 1], 
-                              padding='SAME', 
+                              padding='VALID', 
                               name=name)
     
     def load_weights(self, session):
-        """ 
-        Assign pretrained weights and variables to the trainable layers
-        Pretrained model downloaded from http://www.cs.toronto.edu/~guerzhoy/tf_alexnet/ 
-        """
+        """Assign pretrained weights and variables to the trainable layers
+           Pretrained model downloaded from http://www.cs.toronto.edu/~guerzhoy/tf_alexnet/"""
         pretrained_weights = np.load('bvlc_alexnet.npy', encoding = 'bytes').item()
 
         for layer in pretrained_weights:
-            if layer not in self.fixed_layers:
+            if layer in self.fixed_layers:
                 with tf.variable_scope(layer, reuse = True):
                     for item in pretrained_weights[layer]:
                         if len(item.shape) > 1:
                             weight_var = tf.get_variable('weights', trainable = False)
-                            session.run(weight_var.assign(weight_var))
+                            session.run(weight_var.assign(item))
                         else:
                             bias_var = tf.get_variable('biases', trainable = False)
-                            session.run(bias_var.assign(bias_var))
+                            session.run(bias_var.assign(item))
                             
     def next_batch(self):
         """load next minibatch of inputs and labels"""
         if self.batch_index <= len(self.inputs)-self.batch_size:
-        
-            inputs_batch = self.inputs[self.batch_index:self.batch_index+self.batch_size]
-            inputs_batch = np.asarray(inputs_batch).astype(np.float32)
             
-            labels_batch = self.labels[self.batch_index:self.batch_index+self.batch_size]
-            labels_batch = np.asarray(labels_batch).astype(np.float32)
+            
+            input_batch = self.inputs[self.batch_index:self.batch_index+self.batch_size]
+            input_batch = np.asarray(input_batch).astype(np.float32)
+            
+            label_batch = self.labels[self.batch_index:self.batch_index+self.batch_size]
+            label_batch = np.asarray(label_batch).astype(np.float32)
             
             self.batch_index += self.batch_size
             
-        return inputs_batch, labels_batch
+        return input_batch, label_batch
         
-
+    def shuffle_data(self):
+        impact_video_shuffled = [self.inputs[i:i+15] for i in range(len(self.inputs)//15)]
+        impact_audio_shuffled = [self.labels[i:i+45] for i in range(len(self.labels)//45)]
+        
+        shuffle_together = list(zip(impact_video_shuffled, impact_audio_shuffled))
+        shuffle(shuffle_together)
+        
+        impact_video_shuffled = [item for item,_ in shuffle_together]
+        impact_audio_shuffled = [item for _,item in shuffle_together]
+        
+        self.input_data = list(chain.from_iterable(impact_video_shuffled))
+        self.label_data = list(chain.from_iterable(impact_audio_shuffled))
         
