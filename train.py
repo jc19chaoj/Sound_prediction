@@ -3,7 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from data import data_prepare
-from model import cnn_rnn
+from model_alexnet import cnn_rnn
+
+def crop_image(img,cropx,cropy):
+    y,x = img.shape[:2]
+    startx = x//2-(cropx//2)
+    starty = y//2-(cropy//2)    
+    return img[starty:starty+cropy,startx:startx+cropx,:]
 
 def main_test(if_shuffle=False):
     dp = data_prepare(train_size=10)
@@ -40,18 +46,19 @@ def main_test(if_shuffle=False):
     
     # training configuration
     input_data = input_data[0:15]
-    input_data = [val for val in input_data for _ in range(3)] # up-sampling input data by 3
+    input_data = [crop_image(val,224,224) for val in input_data for _ in range(3)] # up-sampling input data by 3
     label_data = label_data[0:45]
     #print(tf.convert_to_tensor(np.asarray(label_data)))
     
     plt.figure()
     plt.imshow(np.asarray(np.asarray(label_data).T))
     plt.colorbar(orientation='vertical')
-    plt.show()
+    #plt.show()
+    plt.savefig('test_label.png')
     
     model = cnn_rnn(batch_size=45, learn_rate=0.001, keep_prob=1)
 
-    model.train(input_data, label_data, input_data, epoch=1000)
+    model.train(input_data, label_data, input_data, epoch=1000, crop_inputs=False)
     
     #model.test(test_data)
     
