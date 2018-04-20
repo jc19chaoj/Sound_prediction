@@ -1,16 +1,17 @@
 # Chao Jiang
 # Model: CNN (AlexNet) + RNN w/ LSTM
-
+import os
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from random import shuffle
 from itertools import chain
-#import crop_image
+
+
+LOGDIR = './training_log'
 
 class cnn_rnn:
     """ AlexNet + RNN with LSTM model """
-
     def __init__(self, 
                  fixed_layers=['conv1','conv2','conv3','conv4','conv5'],
                  keep_prob=0.5, 
@@ -27,8 +28,8 @@ class cnn_rnn:
         self.batch_size = batch_size
         
         # inputs' and labels' placeholder
-        self.X = tf.placeholder(tf.float32, [self.batch_size, 224, 224, 3])
-        self.Y = tf.placeholder(tf.float32, [self.batch_size, 42])
+        self.X = tf.placeholder(tf.float32, [None, 224, 224, 3])
+        self.Y = tf.placeholder(tf.float32, [None, 42])
         
         # LSTM layers config
         self.num_layers = lstm_layers
@@ -79,7 +80,7 @@ class cnn_rnn:
             self.cnn_output = self.fc7
         
         # reshaped to [batch_size, time_step, LSTM_size] for feeding to LSTM
-        self.cnn_output = tf.reshape(self.cnn_output, shape=[self.batch_size,1,4096])
+        self.cnn_output = tf.reshape(self.cnn_output, shape=[-1,self.batch_size,4096])
         
         # RNN layers
         with tf.variable_scope('rnn'):
@@ -94,26 +95,31 @@ class cnn_rnn:
             outputs, states = tf.nn.dynamic_rnn(multi_layer_rnn, self.cnn_output, dtype=tf.float32)
 
             # dense layer
-            outputs = tf.reshape(outputs, shape=[self.batch_size,256])
+            outputs = tf.reshape(outputs, shape=[-1,256])
             self.logits = tf.matmul(outputs, weights) + biases
             
             
         # define loss function
-        rho = lambda r: tf.log(tf.add(tf.square(r),1/625))
-        loss = rho(tf.nn.l2_loss(self.Y-self.logits))                        
+        rho = lambda r: tf.log(tf.add(tf.square(r), 1/625))
+        loss = rho(tf.nn.l2_loss(self.Y-self.logits)) 
+
+        #loss = tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.logits, labels=self.Y)                        
         self.mean_loss = tf.reduce_mean(loss)
         self.total_loss = tf.reduce_sum(loss)
         
         # choose optimizer
         #self.optimizer = tf.train.AdamOptimizer(self.learn_rate).minimize(self.mean_loss)
-        self.optimizer = tf.train.AdamOptimizer(self.learn_rate).minimize(self.total_loss)
+        self.optimizer = tf.train.AdamOptimizer(self.learn_rate).minimize(self.mean_loss)
         
         #return self.logits
+        self.saver = tf.train.Saver()
+
         
     def train(self, 
+             sess, 
+             if_restore,
              inputs, 
              labels,
-             test_inputs,
              crop_inputs=False,
              epoch=10):
         
@@ -125,52 +131,64 @@ class cnn_rnn:
         self.inputs = [frame/255 for frame in inputs]
         # self.inputs = [tf.image.convert_image_dtype(frame, dtype=tf.float32) for frame in inputs]
         if crop_inputs:
-            self.inputs = [tf.image.resize_image_with_crop_or_pad(self.inputs,227,227) for frame in inputs]
+            self.inputs = [tf.image.resize_image_with_crop_or_pad(self.inputs,224,224) for frame in inputs]
             #self.inputs = [crop_image for frame in inputs]
         self.labels = labels
         
         print(len(self.inputs),self.inputs[0].shape)
         print(len(self.labels),self.labels[0].shape)
         
-        with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
-            # load pre-trained model
-            self.load_weights(sess)
-            
-            # training
+        #with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        # load pre-trained model
+        self.load_weights(sess)
+        
+        # training
+        if if_restore:
+            #tf.reset_default_graph()
+            restore_meta = tf.train.import_meta_graph(os.path.join(LOGDIR, 'model.ckpt-100.meta'))
+            restore_meta.restore(sess, tf.train.latest_checkpoint(LOGDIR))
+            print("Resume training...")
+        else:
             print("Start training...")
-            for i in range(self.epoch):
+
+        for i in range(self.epoch):
+            self.batch_index = 0
+            #self.shuffle_data()
+            for j in range(len(self.inputs)//self.batch_size):
+                inputs_batch, labels_batch = self.next_batch()
+                loss, _ = sess.run([self.mean_loss, self.optimizer], feed_dict={self.X: inputs_batch, self.Y: labels_batch})
+            if i%1 == 0: 
                 print("epoch: ", i)
-                self.batch_index = 0
-                self.shuffle_data()
-                for j in range(len(self.inputs)//self.batch_size):
-                    inputs_batch, labels_batch = self.next_batch()
-                    #print(inputs_batch.shape, labels_batch.shape)
-                    
-                    loss, _ = sess.run([self.total_loss, self.optimizer], feed_dict={self.X: inputs_batch, self.Y: labels_batch})
                 print("    error: ", loss)
+            if i % 100 == 0:
+                self.saver.save(sess, os.path.join(LOGDIR, "model.ckpt"), i)
             
-            self.test(sess, test_inputs)
+            # print(len(test_inputs))
+            # print(np.asarray(test_inputs).shape)
+            # self.test(sess, np.asarray(test_inputs))
 
 
     def test(self, sess, test_inputs):
         """evaluate prediction"""
         predict_sound_feature = []
         for w in range(len(test_inputs)//self.batch_size):        
-            logits = sess.run(self.logits, feed_dict={self.X: test_inputs})
-            predict_sound_feature.extend(logits)
+            logits = sess.run(self.logits, feed_dict={self.X: test_inputs[w*self.batch_size:(w+1)*self.batch_size]})
+            predict_sound_feature.append(logits)
             
-        predict_sound_feature = np.asarray(predict_sound_feature)
-        plt.figure()
-        plt.imshow(np.asarray(predict_sound_feature.T))
-        plt.colorbar(orientation='vertical')
-        plt.show()
+        #predict_sound_feature = np.asarray(predict_sound_feature)
+        #predict_sound_feature = np.asarray(logits)
+        for prediction in predict_sound_feature:
+            plt.figure()
+            plt.imshow(np.asarray(prediction.T))
+            plt.colorbar(orientation='vertical')
+            plt.show()
     
     # Helper functions
     def flatten_tensor(self, inputs):
         input_height, input_width, input_channel = inputs.get_shape()[1:]
         input_units = input_height*input_width*input_channel
-        reshaped_inputs = tf.reshape(inputs, shape=[self.batch_size, 1, input_units])
+        reshaped_inputs = tf.reshape(inputs, shape=[-1, 1, input_units])
         return reshaped_inputs
 
     def conv_layer(self, name, inputs, filter_size, output_size, stride=1, padding='SAME', group=1, 
@@ -275,4 +293,3 @@ class cnn_rnn:
         
         self.input_data = list(chain.from_iterable(impact_video_shuffled))
         self.label_data = list(chain.from_iterable(impact_audio_shuffled))
-        
