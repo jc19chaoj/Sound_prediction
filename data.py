@@ -7,9 +7,23 @@ import pandas as pd
 import tensorflow as tf
 import scipy.io as spio
 #%matplotlib
+from config import *
+
+def crop_image(img,cropx,cropy):
+    y,x = img.shape[:2]
+    startx = x//2-(cropx//2)
+    starty = y//2-(cropy//2)    
+    return img[starty:starty+cropy,startx:startx+cropx,:]
+
+def upsampling(inputs):
+    input_data = []
+    for i in range(len(inputs)):
+        for j in range(3):
+            input_data.append(inputs[(j+i)%len(inputs)])
+    return input_data
 
 class data_prepare:
-    def __init__(self, train_size=977, impact_size=10, video_path="../video_thumb", impact_path="../audio_txt", audio_path="../audio_mat"):
+    def __init__(self, train_size=977, impact_size=3):
         # path of video files
         self.video_path = video_path
         self.impact_path = impact_path
@@ -76,12 +90,11 @@ class data_prepare:
         for i in range(len(impact_onsets)):
             impact_frames_temp = []
             for j in range(self.impact_size):
-            #for onset in impact_onsets[i]:
-                #onset = int(onset)
-                
+                if j >= len(impact_onsets[i]):
+                    j = len(impact_onsets[i])-1
                 onsets = int(impact_onsets[i][j])
-                print(onsets)
-                
+                #print(onsets)
+
                 self.impact_frames.extend(self.videos[i][onsets-7:onsets+8])
                 impact_frames_temp.append(self.videos[i][onsets-7:onsets+8])
             self.impact_videos.append(impact_frames_temp)
@@ -107,11 +120,9 @@ class data_prepare:
                 self.audio_list.append(mat)
                 self.sound_database[filename] = []
                 i += 1
-                print("Sound feature size:", mat.shape)
-                #for j in range(mat.shape[0]):
-                for j in range(self.impact_size):
-                    self.sound_features.extend(mat[j])
-                    self.sound_database[filename].append(mat[j,22,:]) 
+                #print("Sound feature size:", mat.shape)
+                self.sound_features.extend(mat[0:self.impact_size])
+                self.sound_database[filename].append(mat[0:self.impact_size]) 
             else:
                 break
 
@@ -123,7 +134,7 @@ class data_prepare:
             plt.show()
 
 
-def test():
+def simple_test():
 
     dp = data_prepare(train_size=5)
     dp.load_audio()
@@ -131,5 +142,6 @@ def test():
     #print(dp.sound_database)
     print(np.asarray(dp.sound_features).shape)
     print("Sound feature list length:", len(dp.sound_database['../audio_mat/2015-02-16-16-49-06_sf.mat']))
+
 if __name__ == "__main__":
-    test()
+    simple_test()
