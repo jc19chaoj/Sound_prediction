@@ -28,4 +28,4 @@ Training:
 
 Inference:
 
-  Run "python synthesize.py <check_point_number>" to generate audio from a short video based on the training result.
+  Run "python synthesize.py <check_point_number> <video_id>" to generate audio from a short video based on the training result.
