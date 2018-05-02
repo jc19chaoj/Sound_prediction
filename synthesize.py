@@ -23,7 +23,7 @@ class audio_synthesize:
         for key,value in self.label_data.items():
             for feature in value[0]:
                 #print("predict:", predict.shape, feature.shape)
-                l2_loss = np.linalg.norm((predict[:,22,:] - feature[22,:]))
+                l2_loss = np.linalg.norm((normalize(predict[:,:,:]) - normalize(feature[:,:])))
                # print("l2_loss:", l2_loss)
 
                 if l2_loss < min_l2_loss:
@@ -31,16 +31,16 @@ class audio_synthesize:
                     self.sound_filename = key
 
 
-def main(check_point, train_size=15):
-    dp = data_prepare(train_size=train_size, impact_size=10)
-    dp.load_audio()
-    generate_audio = audio_synthesize(dp.sound_database)
+def main(check_point, train_size=[0,15], test_video=0):
+    sd = data_prepare(train_size=[0,100])
+    sd.load_audio(test=test_video)
+    generate_audio = audio_synthesize(sd.sound_database)
 
-    #dp = data_prepare(train_size=20)
+    dp = data_prepare(train_size=train_size, impact_size=1)
     dp.video_cap()
-    dp.prediction_frames()
+    dp.prediction_frames(test=test_video)
 
-    test_video = dp.impact_videos[10][3]
+    test_video = dp.impact_videos[test_video][0]
    # test_video = [np.random.rand(600,300,3) for _ in range(15)]
     test_data = upsampling(test_video)
     test_data = [crop_image(frame,224,224) for frame in test_data]
@@ -59,5 +59,6 @@ def main(check_point, train_size=15):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("check_point")
+    parser.add_argument("test_video", type=int)
     args = parser.parse_args()
-    main(check_point=args.check_point)
+    main(check_point=args.check_point, test_video=args.test_video)

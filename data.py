@@ -23,7 +23,7 @@ def upsampling(inputs):
     return input_data
 
 class data_prepare:
-    def __init__(self, train_size=977, impact_size=3):
+    def __init__(self, train_size=[0, 976], impact_size=3):
         # path of video files
         self.video_path = video_path
         self.impact_path = impact_path
@@ -42,13 +42,11 @@ class data_prepare:
         cap_list = []
         i = 0
         for filename in sorted(os.listdir(self.video_path)):
-            if i<self.train_size:
+            if i in range(self.train_size[0], self.train_size[1]):
                 filename = os.path.join(self.video_path, filename)
                 cap = cv2.VideoCapture(filename)
                 cap_list.append(cap)
-                i += 1
-            else:
-                break
+            i += 1
 
         # store all frames into a list
         for i in range(len(cap_list)):
@@ -76,13 +74,11 @@ class data_prepare:
 
         i = 0
         for filename in sorted(os.listdir(self.impact_path)):
-            if i<self.train_size:
+            if i in range(self.train_size[0], self.train_size[1]):
                 filename = os.path.join(self.impact_path, filename)
                 impact_onset = pd.read_csv(filename, sep=" ", header=None)
                 onset_list.append(impact_onset)
-                i += 1
-            else:
-                break
+            i += 1
 
         for onset in onset_list:
             impact_onsets.append(round(onset[0]*29.97).tolist())
@@ -92,6 +88,7 @@ class data_prepare:
             for j in range(self.impact_size):
                 if j >= len(impact_onsets[i]):
                     j = len(impact_onsets[i])-1
+                    #break
                 onsets = int(impact_onsets[i][j])
                 #print(onsets)
 
@@ -112,19 +109,17 @@ class data_prepare:
         i = 0
         
         for filename in sorted(os.listdir(self.audio_path)):
-            if i<self.train_size:
+            if i in range(self.train_size[0], self.train_size[1]):
                 filename = os.path.join(self.audio_path, filename)
                 mat = spio.loadmat(filename, squeeze_me=True)
                 mat = mat['sfs']
                 
                 self.audio_list.append(mat)
                 self.sound_database[filename] = []
-                i += 1
                 #print("Sound feature size:", mat.shape)
                 self.sound_features.extend(mat[0:self.impact_size])
                 self.sound_database[filename].append(mat[0:self.impact_size]) 
-            else:
-                break
+            i += 1
 
         if test!=None:
             # plot a random sound feature
@@ -136,12 +131,13 @@ class data_prepare:
 
 def simple_test():
 
-    dp = data_prepare(train_size=5)
+    dp = data_prepare(train_size=[10,15])
     dp.load_audio()
-
+    dp.video_cap()
+    dp.prediction_frames(test=1)
     #print(dp.sound_database)
     print(np.asarray(dp.sound_features).shape)
-    print("Sound feature list length:", len(dp.sound_database['../audio_mat/2015-02-16-16-49-06_sf.mat']))
+    print("Sound feature list length:", dp.sound_database['../audio_mat/2015-02-16-16-49-06_sf.mat'][0].shape)
 
 if __name__ == "__main__":
     simple_test()

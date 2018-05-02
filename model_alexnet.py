@@ -16,7 +16,7 @@ class cnn_rnn:
                  fixed_layers=['conv1','conv2','conv3','conv4','conv5'],
                  keep_prob=1, 
                  batch_size=45, 
-                 lstm_layers=3,
+                 lstm_layers=2,
                  learn_rate=0.001, 
                  num_class=0):
         
@@ -54,7 +54,7 @@ class cnn_rnn:
         #print("conv3", self.conv3.get_shape())
         # conv4
         self.conv4 = self.conv_layer('conv4', self.conv3, [3, 3], 384, group=2)
-        #print("conv4", self.conv3.get_shape())
+        #print("conv4", self.conv4.get_shape())
         # conv5
         self.conv5 = self.conv_layer('conv5', self.conv4, [3, 3], 256, group=2)
         self.pool5 = self.pool_layer('pool5', self.conv5, [3, 3], 2)
@@ -69,8 +69,11 @@ class cnn_rnn:
         self.fc7 = self.fc_layer('fc7', self.dropout6, 4096, trainable=True)
         self.dropout7 = tf.nn.dropout(self.fc7, keep_prob=self.keep_prob, name='dropout7')
 
-        self.cnn_output = self.fc7
-        
+        #self.cnn_output = self.fc7
+
+        # use min max normalization
+        self.cnn_output = tf.div(tf.subtract(self.fc7, tf.reduce_min(self.fc7)), tf.subtract(tf.reduce_max(self.fc7), tf.reduce_min(self.fc7)))
+
         # reshaped to [batch_size, time_step, LSTM_size] for feeding to LSTM
         self.cnn_output = tf.reshape(self.cnn_output, shape=[-1,45,4096])
 
@@ -80,7 +83,7 @@ class cnn_rnn:
             lstm = tf.contrib.rnn.BasicLSTMCell
             cells = []
             for _ in range(self.num_layers):
-                cells.append(lstm(self.lstm_size))
+                cells.append(lstm(self.lstm_size, forget_bias=1.0))
 
             multi_layer_rnn = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
             outputs, states = tf.nn.dynamic_rnn(multi_layer_rnn, self.cnn_output, dtype=tf.float32)
@@ -159,12 +162,13 @@ class cnn_rnn:
                 #self.shuffle_data()
             if i%50 == 0:
                 self.saver.save(sess, os.path.join(LOGDIR, "model.ckpt"), i)
-        #        send_to_gmail(i, loss)
-
 
 
     def test(self, sess, test_inputs):
         """evaluate training"""
+        # sess.run(tf.global_variables_initializer())
+        # self.load_weights(sess, trainable=False)
+
         predict_sound_feature = []
         for w in range(len(test_inputs)//45):        
             logits = sess.run(self.logits, feed_dict={self.X: test_inputs[w*self.batch_size:(w+1)*self.batch_size]})
@@ -183,15 +187,15 @@ class cnn_rnn:
         restore_meta = tf.train.import_meta_graph(os.path.join(LOGDIR, 'model.ckpt-{}.meta'.format(check_point)))
         restore_meta.restore(sess, tf.train.latest_checkpoint(LOGDIR))
         print("Start inference...")
-        cnn_output, rnn_output, predict = sess.run([self.fc7, self.rnn_output, self.logits], feed_dict={self.X: frame})
+        cnn_output, rnn_output, predict = sess.run([self.cnn_output, self.rnn_output, self.logits], feed_dict={self.X: frame})
         print("Prediction shape:", predict.shape)
         print("CNN OUT:", cnn_output)
         print("RNN OUT:", rnn_output)
         return predict
 
+    ######################################################################
+    # Helper functions:
 
-
-    # Helper functions
     def flatten_tensor(self, inputs):
         input_height, input_width, input_channel = inputs.get_shape()[1:]
         input_units = input_height*input_width*input_channel

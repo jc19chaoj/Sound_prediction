@@ -11,7 +11,7 @@ from itertools import chain
 from config import *
 
 def main(if_shuffle=False, if_restore=False, check_point=100):
-    dp = data_prepare(train_size=5, impact_size=5)
+    dp = data_prepare(train_size=[0,100], impact_size=5)
     dp.video_cap()
     dp.prediction_frames()
     dp.load_audio()
@@ -46,18 +46,18 @@ def main(if_shuffle=False, if_restore=False, check_point=100):
     #print(np.asarray(label_data).shape)
     
 
-    plt.figure()
-    plt.imshow(np.asarray(label_data[0:45]).T)
-    plt.colorbar(orientation='vertical')
+    #plt.figure()
+    #plt.imshow(np.asarray(label_data[0:45]).T)
+    #plt.colorbar(orientation='vertical')
     #plt.show()
-    plt.savefig('test_label.png')
+    #plt.savefig('test_label.png')
     
     
-    model = cnn_rnn(batch_size=90, learn_rate=3e-6, keep_prob=1)
+    model = cnn_rnn(batch_size=180, learn_rate=3e-6, keep_prob=1)
     with tf.Session() as sess:
         
-        model.train(sess, if_restore, input_data, label_data, epoch=1000, check_point=check_point)
-        model.test(sess, input_data[0:45])
+        model.train(sess, if_restore, input_data, label_data, epoch=1001, check_point=check_point)
+        #model.test(sess, input_data[100:280])
         #model.test(sess, input_data[3000:3045])
 
 if __name__ == "__main__":
